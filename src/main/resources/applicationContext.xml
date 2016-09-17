@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:util="http://www.springframework.org/schema/util"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:jdbc="http://www.springframework.org/schema/jdbc" xmlns:jee="http://www.springframework.org/schema/jee"
+	xmlns:tx="http://www.springframework.org/schema/tx" xmlns:task="http://www.springframework.org/schema/task"
+	xmlns:aop="http://www.springframework.org/schema/aop"
+	xsi:schemaLocation="
+        http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-4.0.xsd
+        http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-4.0.xsd
+        http://www.springframework.org/schema/jdbc http://www.springframework.org/schema/jdbc/spring-jdbc-4.0.xsd
+        http://www.springframework.org/schema/jee http://www.springframework.org/schema/jee/spring-jee-4.0.xsd
+        http://www.springframework.org/schema/tx http://www.springframework.org/schema/tx/spring-tx-4.0.xsd 
+        http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util-4.0.xsd 
+        http://www.springframework.org/schema/task http://www.springframework.org/schema/task/spring-task-4.0.xsd
+        http://www.springframework.org/schema/aop http://www.springframework.org/schema/aop/spring-aop-4.0.xsd">
+
+	<description>Spring公共配置</description>
+
+	<context:component-scan base-package="com.lxg.*" />
+
+	<!-- 配置主数据源  -->
+	<bean id="dataSourceMaster" class="org.apache.commons.dbcp.BasicDataSource">
+		<property name="driverClassName" value="${jdbc.driver}" />
+		<property name="url" value="${jdbc.master.url}" />
+		<property name="username" value="${jdbc.master.username}" />
+		<property name="password" value="${jdbc.master.password}" />
+	</bean>
+	
+	<!-- 配置从数据源 -->
+	<bean id="dataSourceSlaver" class="org.apache.commons.dbcp.BasicDataSource">
+		<property name="driverClassName" value="${jdbc.driver}" />
+		<property name="url" value="${jdbc.slaver.url}" />
+		<property name="username" value="${jdbc.slaver.username}" />
+		<property name="password" value="${jdbc.slaver.password}" />
+	</bean>
+
+	<bean id="dataSource" class="com.lxg.springdatesource.DynamicDataSource">
+		<!-- 通过key-value的形式来关联数据源 -->
+		<property name="targetDataSources">
+			<map>
+				<entry value-ref="dataSourceMaster" key="Master"></entry>
+				<entry value-ref="dataSourceSlaver" key="Slaver"></entry>
+			</map>
+		</property>
+		<property name="defaultTargetDataSource" ref="dataSourceMaster" />
+	</bean>
+
+	<!-- MyBatis配置 -->
+	<bean id="sqlSessionFactory" class="org.mybatis.spring.SqlSessionFactoryBean">
+		<property name="dataSource" ref="dataSource" />
+		<!-- 显式指定Mapper文件位置 -->
+		<property name="mapperLocations" value="classpath*:/mybatis/*Mapper.xml" />
+		<!-- mybatis配置文件路径 -->
+		<property name="configLocation" value="classpath:/mybatis/config.xml" />
+	</bean>
+
+	<bean id="sqlSessionTemplate" class="org.mybatis.spring.SqlSessionTemplate">
+		<constructor-arg index="0" ref="sqlSessionFactory" />
+		<!-- 这个执行器会批量执行更新语句, 还有SIMPLE 和 REUSE -->
+		<constructor-arg index="1" value="BATCH" />
+	</bean>
+
+	<!-- 扫描basePackage接口 -->
+	<bean class="org.mybatis.spring.mapper.MapperScannerConfigurer">
+		<!-- 映射器接口文件的包路径， -->
+		<property name="basePackage" value="com.lxg.dao" />
+		<property name="sqlSessionFactoryBeanName" value="sqlSessionFactory" />
+	</bean>
+
+
+	
+	<!-- 开启注解式事务控制 -->
+	<tx:annotation-driven transaction-manager="transactionManager" />
+
+	<!-- 配置事务管理器 -->
+	<bean id="transactionManager"
+		class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+		<property name="dataSource" ref="dataSource"></property>
+	</bean>
+
+	<!-- 定义事务策略 -->
+	<tx:advice id="txAdvice" transaction-manager="transactionManager"/>
+
+	<!-- 定义AOP切面处理器 -->
+	<bean class="com.lxg.springdatesource.DataSourceAspect" id="dataSourceAspect" />
+
+	<aop:config>
+		<!--pointcut元素定义一个切入点，execution中的第一个星号 用以匹配方法的返回类型， 这里星号表明匹配所有返回类型。 
+		com.lxg.service.*.*(..)表明匹配com.lxg.service包下的所有类的所有 
+			方法 -->
+		<aop:pointcut id="myPointcut" expression="execution(* com.lxg.service.impl.*.*(..))" />
+		<!--将定义好的事务处理策略应用到上述的切入点 -->
+		<aop:advisor advice-ref="txAdvice" pointcut-ref="myPointcut" />
+
+		<!-- 将切面应用到自定义的切面处理器上，-9999保证该切面优先级最高执行 -->
+		<aop:aspect ref="dataSourceAspect" order="-9999">
+			<aop:before method="before" pointcut-ref="myPointcut" />
+		</aop:aspect>
+
+	</aop:config>
+	
+	
+	<!-- production环境 -->
+	<beans>
+		<context:property-placeholder
+			ignore-unresolvable="true" file-encoding="utf-8" location="classpath:jdbc.properties" />
+	</beans>
+</beans>
